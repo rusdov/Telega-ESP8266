@@ -1,106 +1,121 @@
 #include <ESP8266WiFi.h>
 #include <WiFiClientSecure.h>
 #include <UniversalTelegramBot.h>
-#include "auth.h"
+#include <ArduinoJson.h>
 
-//dht11
-#include <DHT.h>
-#define DHTPIN 2
-DHT dht(DHTPIN, DHT11);
-float temp;
-float hum;
-int tempSet = 25;
+#include "auth.h"
 
 //timer
 #include <SimpleTimer.h> 
 SimpleTimer timer;
 
-
 WiFiClientSecure client;
-UniversalTelegramBot bot(BOTtoken, client);
+UniversalTelegramBot bot(TELEGRAM_BOT_TOKEN, client);
 
-int Bot_mtbs = 1000; //mean time between scan messages
-long Bot_lasttime;   //last time messages' scan has been done
-bool Start = false;
+//pins
+const byte moisPin = A0;    
+const int pmpPin = 12; // D6
+const int lightPin = 13; // D7
 
-const int ledPin = 4;
-int ledStatus = 0;
+const int trigPin = 5; //D1
+const int echoPin = 4; //D2
 
-void getDHT(){
-  hum = dht.readHumidity(); 
-  temp = dht.readTemperature();
-  Serial.print("Влажность: ");
-  Serial.print(hum);
-  Serial.print(" %\t");
-  Serial.print("Температура: ");
-  Serial.print(temp);
-  Serial.println(" *C ");
+//vars
+int moisture;
+int moisVolt;
+int moisSet = 30;
+int pmpTimer = 1000;
+long duration;
+int distance;
+int setDist = 15;
+
+unsigned long pmpOnTime;
+bool pmpOn = false;
+
+unsigned long lightTimerExpires;
+boolean lightTimerActive = false;
+                                   //moisture read
+void msensor(){
+  moisVolt = analogRead(moisPin);
+  Serial.print("msensor voltage =  ");
+  Serial.print(moisVolt);
+
+  moisture = constrain(moisVolt,460,859);
+  moisture = map(moisVolt, 855, 396, 0, 100);
+if (moisture < 0){
+  moisture =0;
+}
+if (moisture > 100){
+  moisture =100;
+}
+Serial.print("moisture =  ");
+Serial.print(moisture);
 }
 
-  void handleNewMessages(int numNewMessages) {
-  Serial.println("handleNewMessages");
-  Serial.println(String(numNewMessages));
+void GetDistance(){
+  
+  digitalWrite(trigPin, LOW);  
+  delayMicroseconds(3); 
+  
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(12); 
+  
+  digitalWrite(trigPin, LOW);
+  duration = pulseIn(echoPin, HIGH);
+  distance = (duration/2) / 29.1;
+  Serial.print("value :");
+  Serial.println(distance);
+}
 
-  for (int i=0; i<numNewMessages; i++) {
-    String chat_id = String(bot.messages[i].chat_id);
-    String text = bot.messages[i].text;
+void tankAlarm(){
+if (distance < setDist){
+  Serial.print("БАК ПУСТ!");
+  
+ }
+}
 
-    String from_name = bot.messages[i].from_name;
-    if (from_name == "") from_name = "Guest";
+void pmpStart(){
+if (moisture < moisSet){
+    digitalWrite(pmpPin, LOW);
+    pmpOn = true;
+    pmpOnTime = millis(); 
+    Serial.print("ПОЛИВАЮ! ");
+ }
+}
 
-    if (text == "/ledon") {
-      digitalWrite(ledPin, HIGH);   // turn the LED on (HIGH is the voltage level)
-      ledStatus = 1;
-      bot.sendMessage(chat_id, "Led is ON", "");
-    }
-
-    if (text == "/ledoff") {
-      ledStatus = 0;
-      digitalWrite(ledPin, LOW);    // turn the LED off (LOW is the voltage level)
-      bot.sendMessage(chat_id, "Led is OFF", "");
-    }
-
-    if (text == "/status") {
-      if(ledStatus){
-        bot.sendMessage(chat_id, "Led is ON", "");
-      } else {
-        bot.sendMessage(chat_id, "Led is OFF", "");
-      }
-    }
-    
-    if (text == "/dht"){
-      bot.sendMessage(chat_id,"Температура в бараке");
-     bot.sendMessage(chat_id, String(temp) + "  C");
-     bot.sendMessage(chat_id, "Влажность в бараке");
-      bot.sendMessage(chat_id, String(hum) + " %");
-    }
-     if(temp < tempSet){
-     bot.sendMessage(chat_id,"Стало холодно пиздец!");
-     bot.sendMessage(chat_id, String(temp) + "  C");
+void pmpStop(){
+if (pmpOn = true){
+if (millis() - pmpOnTime > pmpTimer){
+    digitalWrite(pmpPin, HIGH); 
+    pmpOn = false;      
   }
- 
-      if (text == "/start") {
-      String welcome = "Welcome to Universal Arduino Telegram Bot library, " + from_name + ".\n";
-      welcome += "This is Flash Led Bot example.\n\n";
-      welcome += "/ledon : to switch the Led ON\n";
-      welcome += "/ledoff : to switch the Led OFF\n";
-      welcome += "/status : Returns current status of LED\n";
-      welcome += "/dht : Show DHT sensor value";
-      bot.sendMessage(chat_id, welcome, "Markdown");
-    }
-   }
+ } 
 }
 
+void lightStop(){
 
+if (lightTimerActive && millis() > lightTimerExpires) {
+   digitalWrite(lightPin, HIGH);
+   lightTimerActive = false;
+  }
+}
+ 
 void setup() {
+  
   Serial.begin(115200);
-  dht.begin();
-  // Set WiFi to station mode and disconnect from an AP if it was Previously
-  // connected
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   delay(100);
-
+  
+  //pin mode
+  pinMode(pmpPin, OUTPUT);
+  pinMode(lightPin, OUTPUT);
+   pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  //pin set
+  digitalWrite(pmpPin, HIGH);
+  digitalWrite(lightPin, HIGH);
+ 
   // attempt to connect to Wifi network:
   Serial.print("Connecting Wifi: ");
   Serial.println(ssid);
@@ -110,31 +125,325 @@ void setup() {
     Serial.print(".");
     delay(500);
   }
-  
-  //timers
-timer.setInterval(10000, getDHT);
 
   Serial.println("");
   Serial.println("WiFi connected");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
-  pinMode(ledPin, OUTPUT); // initialize digital ledPin as an output.
-  delay(10);
-  digitalWrite(ledPin, LOW); // initialize pin as off
+  // Only required on 2.5 Beta
+  client.setInsecure();
+
+  bot.longPoll = 5;
+  
+#include "timers.h"  //func timer set
+ 
+}
+
+void handleNewMessages(int numNewMessages) {
+
+  for (int i = 0; i < numNewMessages; i++) {
+
+    // If the type is a "callback_query", a inline keyboard button was pressed
+    if (bot.messages[i].type ==  F("callback_query")) {
+      String text = bot.messages[i].text;
+      Serial.print("Call back button pressed with text: ");
+      Serial.println(text);
+
+      if (text == F("ON")) {
+        digitalWrite(lightPin, LOW);
+      } 
+      
+      else if (text == F("OFF")) {
+        digitalWrite(lightPin, HIGH);
+      } 
+      
+      else if (text == F("18na6")) {
+        digitalWrite(lightPin, HIGH);
+      } 
+      
+      else if (text.startsWith("TIME")) {
+        text.replace("TIME", "");
+        int timeRequested = text.toInt();
+        
+        digitalWrite(lightPin, LOW);
+        lightTimerActive = true; 
+        lightTimerExpires = millis() + (timeRequested * 10 * 60);
+       
+      }
+    } 
+    
+    else {
+      String chat_id = String(bot.messages[i].chat_id);
+      String text = bot.messages[i].text;
+
+      if (text == F("/options")) {
+
+        // Keyboard Json is an array of arrays.
+        // The size of the main array is how many row options the keyboard has
+        // The size of the sub arrays is how many coloums that row has
+
+        // "The Text" property is what shows up in the keyboard
+        // The "callback_data" property is the text that gets sent when pressed  
+        
+        String keyboardJson = F("[[{ \"text\" : \"ON\", \"callback_data\" : \"ON\" },{ \"text\" : \"OFF\", \"callback_data\" : \"OFF\" }],");
+        keyboardJson += F("[{ \"text\" : \"10 Mins\", \"callback_data\" : \"TIME10\" }, { \"te#include <ESP8266WiFi.h>
+#include <WiFiClientSecure.h>
+#include <UniversalTelegramBot.h>
+#include <ArduinoJson.h>
+
+#include "auth.h"
+
+//timer
+#include <SimpleTimer.h> 
+SimpleTimer timer;
+
+WiFiClientSecure client;
+UniversalTelegramBot bot(TELEGRAM_BOT_TOKEN, client);
+
+//pins
+const byte moisPin = A0;    
+const int pmpPin = 12; // D6
+const int lightPin = 13; // D7
+
+const int trigPin = 5; //D1
+const int echoPin = 4; //D2
+
+//vars
+int moisture;
+int moisVolt;
+int moisSet = 30;
+int pmpTimer = 1000;
+long duration;
+int distance;
+int setDist = 15;
+
+unsigned long pmpOnTime;
+bool pmpOn = false;
+
+unsigned long lightTimerExpires;
+boolean lightTimerActive = false;
+                                   //moisture read
+void msensor(){
+  moisVolt = analogRead(moisPin);
+  Serial.print("msensor voltage =  ");
+  Serial.print(moisVolt);
+
+  moisture = constrain(moisVolt,460,859);
+  moisture = map(moisVolt, 855, 396, 0, 100);
+if (moisture < 0){
+  moisture =0;
+}
+if (moisture > 100){
+  moisture =100;
+}
+Serial.print("moisture =  ");
+Serial.print(moisture);
+}
+
+void GetDistance(){
+  
+  digitalWrite(trigPin, LOW);  
+  delayMicroseconds(3); 
+  
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(12); 
+  
+  digitalWrite(trigPin, LOW);
+  duration = pulseIn(echoPin, HIGH);
+  distance = (duration/2) / 29.1;
+  Serial.print("value :");
+  Serial.println(distance);
+}
+
+void tankAlarm(){
+if (distance < setDist){
+  Serial.print("БАК ПУСТ!");
+  
+ }
+}
+
+void pmpStart(){
+if (moisture < moisSet){
+    digitalWrite(pmpPin, LOW);
+    pmpOn = true;
+    pmpOnTime = millis(); 
+    Serial.print("ПОЛИВАЮ! ");
+ }
+}
+
+void pmpStop(){
+if (pmpOn = true){
+if (millis() - pmpOnTime > pmpTimer){
+    digitalWrite(pmpPin, HIGH); 
+    pmpOn = false;      
+  }
+ } 
+}
+
+void lightStop(){
+
+if (lightTimerActive && millis() > lightTimerExpires) {
+   digitalWrite(lightPin, HIGH);
+   lightTimerActive = false;
+  }
+}
+ 
+void setup() {
+  
+  Serial.begin(115200);
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
+  
+  //pin mode
+  pinMode(pmpPin, OUTPUT);
+  pinMode(lightPin, OUTPUT);
+   pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  //pin set
+  digitalWrite(pmpPin, HIGH);
+  digitalWrite(lightPin, HIGH);
+ 
+  // attempt to connect to Wifi network:
+  Serial.print("Connecting Wifi: ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
+
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+
+  // Only required on 2.5 Beta
+  client.setInsecure();
+
+  bot.longPoll = 5;
+  
+#include "timers.h"  //func timer set
+ 
+}
+
+void handleNewMessages(int numNewMessages) {
+
+  for (int i = 0; i < numNewMessages; i++) {
+
+    // If the type is a "callback_query", a inline keyboard button was pressed
+    if (bot.messages[i].type ==  F("callback_query")) {
+      String text = bot.messages[i].text;
+      Serial.print("Call back button pressed with text: ");
+      Serial.println(text);
+
+      if (text == F("ON")) {
+        digitalWrite(lightPin, LOW);
+      } 
+      
+      else if (text == F("OFF")) {
+        digitalWrite(lightPin, HIGH);
+      } 
+      
+      else if (text == F("18na6")) {
+        digitalWrite(lightPin, HIGH);
+      } 
+      
+      else if (text.startsWith("TIME")) {
+        text.replace("TIME", "");
+        int timeRequested = text.toInt();
+        
+        digitalWrite(lightPin, LOW);
+        lightTimerActive = true; 
+        lightTimerExpires = millis() + (timeRequested * 10 * 60);
+       
+      }
+    } 
+    
+    else {
+      String chat_id = String(bot.messages[i].chat_id);
+      String text = bot.messages[i].text;
+
+      if (text == F("/options")) {
+
+        // Keyboard Json is an array of arrays.
+        // The size of the main array is how many row options the keyboard has
+        // The size of the sub arrays is how many coloums that row has
+
+        // "The Text" property is what shows up in the keyboard
+        // The "callback_data" property is the text that gets sent when pressed  
+        
+        String keyboardJson = F("[[{ \"text\" : \"ON\", \"callback_data\" : \"ON\" },{ \"text\" : \"OFF\", \"callback_data\" : \"OFF\" }],");
+        keyboardJson += F("[{ \"text\" : \"10 Mins\", \"callback_data\" : \"TIME10\" }, { \"text\" : \"20 Mins\", \"callback_data\" : \"TIME20\" }, { \"text\" : \"18-6\", \"callback_data\" : \"18na6\" }]]");
+        bot.sendMessageWithInlineKeyboard(chat_id, "Dirka setup", "", keyboardJson);
+      }
+      
+      if (text == F("/status")) {
+        bot.sendMessage(chat_id,"Влажность почвы " + String(moisture) + "  %\n" + "Порог влажности " + String(moisSet) + "  %\n" + String(distance) + "  см");
+       
+        
+      }
+      
+      // When a user first uses a bot they will send a "/start" command
+      // So this is a good place to let the users know what commands are available
+      if (text == F("/start")) {
+
+        bot.sendMessage(chat_id, "/status : returns the inline keyboard\n", "Markdown");
+      }
+    }
+  }
+}
+
+void chkNewMessages(){ 
+  
+    // getUpdates returns 1 if there is a new message from Telegram
+  int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+
+    if (numNewMessages) {
+      Serial.println("got response");
+      handleNewMessages(numNewMessages);
+    }
 }
 
 void loop() {
-  if (millis() > Bot_lasttime + Bot_mtbs)  {
-    int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
 
-    while(numNewMessages) {
+  timer.run(); 
+
+}xt\" : \"20 Mins\", \"callback_data\" : \"TIME20\" }, { \"text\" : \"18-6\", \"callback_data\" : \"18na6\" }]]");
+        bot.sendMessageWithInlineKeyboard(chat_id, "Dirka setup", "", keyboardJson);
+      }
+      
+      if (text == F("/status")) {
+        bot.sendMessage(chat_id,"Влажность почвы " + String(moisture) + "  %\n" + "Порог влажности " + String(moisSet) + "  %\n" + String(distance) + "  см");
+       
+        
+      }
+      
+      // When a user first uses a bot they will send a "/start" command
+      // So this is a good place to let the users know what commands are available
+      if (text == F("/start")) {
+
+        bot.sendMessage(chat_id, "/status : returns the inline keyboard\n", "Markdown");
+      }
+    }
+  }
+}
+
+void chkNewMessages(){ 
+  
+    // getUpdates returns 1 if there is a new message from Telegram
+  int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+
+    if (numNewMessages) {
       Serial.println("got response");
       handleNewMessages(numNewMessages);
-      numNewMessages = bot.getUpdates(bot.last_message_received + 1);
     }
- 
-    Bot_lasttime = millis();
-  }
+}
+
+void loop() {
+
   timer.run(); 
+
 }
