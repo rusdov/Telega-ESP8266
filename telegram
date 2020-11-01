@@ -15,10 +15,10 @@ ESP8266WebServer HTTP(80);
 
 // Определяем переменные wifi
 String _ssid     = "cisco"; // Для хранения SSID
-String _password = "0679767510"; // Для хранения пароля сети
+String _password = "9999"; // Для хранения пароля сети
 String _ssidAP = "WiFi";   // SSID AP точки доступа
 String _passwordAP = ""; // пароль точки доступа
-#define TELEGRAM_BOT_TOKEN "1023170865:AAH0SGYAQyEIgIysVUFk-NEHN3vFZ3TQ5I8"
+#define TELEGRAM_BOT_TOKEN "999"
 
 WiFiClientSecure client;
 UniversalTelegramBot bot(TELEGRAM_BOT_TOKEN, client);
